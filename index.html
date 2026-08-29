@@ -8,6 +8,22 @@
 <meta name="theme-color" content="#1565c0" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<script>
+  window.addEventListener("error", function (e) {
+    var msg = (e && e.message) ? e.message : "erro desconhecido";
+    var box = document.createElement("div");
+    box.style.cssText = "background:#c62828;color:#fff;padding:14px;font-size:14px;white-space:pre-wrap;font-family:monospace;position:relative;z-index:999;";
+    box.textContent = "ERRO: " + msg + (e.filename ? ("\n" + e.filename + ":" + e.lineno) : "");
+    document.body.prepend(box);
+  });
+  window.addEventListener("unhandledrejection", function (e) {
+    var msg = (e.reason && e.reason.message) ? e.reason.message : String(e.reason);
+    var box = document.createElement("div");
+    box.style.cssText = "background:#c62828;color:#fff;padding:14px;font-size:14px;white-space:pre-wrap;font-family:monospace;position:relative;z-index:999;";
+    box.textContent = "ERRO (Firebase/promise): " + msg;
+    document.body.prepend(box);
+  });
+</script>
 <style>
   * { box-sizing: border-box; }
   body {
@@ -359,11 +375,18 @@ document.getElementById("createUserBtn").addEventListener("click", async () => {
   chooseUser({ id: ref.id, name, apelido, cor });
 });
 
+function showFirebaseError(err) {
+  const box = document.createElement("div");
+  box.style.cssText = "background:#c62828;color:#fff;padding:14px;font-size:14px;white-space:pre-wrap;font-family:monospace;position:relative;z-index:999;";
+  box.textContent = "ERRO FIREBASE: " + (err.code || "") + " " + (err.message || err);
+  document.body.prepend(box);
+}
+
 onSnapshot(query(collection(db, "users"), orderBy("name")), snap => {
   users = snap.docs.map(d => ({ id: d.id, ...d.data() }));
   renderUsers();
   renderAssigneeChips();
-});
+}, showFirebaseError);
 
 // ---------- tela: listas ----------
 function goToLists() {
@@ -535,4 +558,21 @@ function renderAssigneeChips() {
   const el = document.getElementById("assigneeChips");
   el.innerHTML = "";
   users.forEach(u => {
-    const chip = document.
+    const chip = document.createElement("div");
+    const isSelected = selectedAssignee?.id === u.id;
+    chip.className = "chip" + (isSelected ? " selected" : "");
+    chip.style.background = lighten(u.cor || "#1565c0", isSelected ? 0.55 : 0.8);
+    chip.style.borderColor = isSelected ? (u.cor || "#1565c0") : "transparent";
+    chip.style.color = u.cor || "#1565c0";
+    chip.textContent = u.apelido || u.name;
+    chip.addEventListener("click", () => { selectedAssignee = u; renderAssigneeChips(); });
+    el.appendChild(chip);
+  });
+}
+
+document.getElementById("openAddItemBtn").addEventListener("click", () => {
+  document.getElementById("itemModalTitle").textContent = "Adicionar item";
+  document.getElementById("itemNameInput").value = "";
+  document.getElementById("itemQtyInput").value = "1";
+  document.getElementById("itemUnitInput").value = "un";
+  document.getElementById("suggestionB
