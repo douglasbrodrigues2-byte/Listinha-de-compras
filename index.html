@@ -151,8 +151,28 @@
   .item-text { font-size: 16px; }
   .item-text.done { text-decoration: line-through; color: #999; }
   .item-qty { font-size: 12px; color: #777; margin-top: 2px; }
-  .item-actions { display: flex; gap: 8px; flex-shrink: 0; }
+  .item-actions { display: flex; gap: 8px; flex-shrink: 0; align-items: center; }
   .icon-btn { font-size: 16px; cursor: pointer; padding: 4px; }
+  .price-pill {
+    background: #c8e6c9; color: #256029; font-size: 12px; font-weight: bold;
+    padding: 4px 10px; border-radius: 12px; white-space: nowrap;
+  }
+
+  .total-banner {
+    background: var(--accent); color: #fff; border-radius: 10px;
+    padding: 14px; margin-bottom: 14px; text-align: center;
+  }
+  .total-banner .label { font-size: 12px; opacity: .85; }
+  .total-banner .value { font-size: 24px; font-weight: bold; margin-top: 2px; }
+
+  .month-heading {
+    font-size: 15px; font-weight: bold; color: #444; margin: 22px 0 8px;
+    padding-bottom: 4px; border-bottom: 2px solid #eee;
+  }
+  .month-total {
+    background: #eef2f7; color: #333; font-size: 13px; font-weight: 600;
+    padding: 10px 12px; border-radius: 8px; margin-bottom: 6px; text-align: right;
+  }
 
   .empty { color: #999; font-style: italic; margin: 16px 0; }
 
@@ -229,6 +249,7 @@
   <!-- TELA: detalhe da lista -->
   <section id="screen-detail" class="screen">
     <div class="back-btn" id="backToListsBtn">← Voltar às listas</div>
+    <div id="totalBanner"></div>
     <div class="list-header-bar">
       <button class="secondary" id="toggleFinishedBtn">Marcar como finalizada</button>
       <button class="red" id="deleteListBtn">Excluir lista</button>
@@ -254,9 +275,22 @@
       <select id="itemUnitInput">
         <option value="un">un</option>
         <option value="kg">kg</option>
+        <option value="g">g</option>
         <option value="pacote">pacote</option>
         <option value="caixa">caixa</option>
       </select>
+    </div>
+
+    <p class="subtitle" id="itemPriceLabel">Preço:</p>
+    <div class="qty-row">
+      <div style="flex:1">
+        <label style="font-size:12px;color:#666;" id="itemUnitPriceLabel">Valor unitário (R$)</label>
+        <input type="number" id="itemUnitPriceInput" placeholder="0,00" min="0" step="0.01" />
+      </div>
+      <div style="flex:1">
+        <label style="font-size:12px;color:#666;">Valor total (R$)</label>
+        <input type="number" id="itemTotalPriceInput" placeholder="0,00" min="0" step="0.01" />
+      </div>
     </div>
 
     <p class="subtitle">Atribuir para:</p>
@@ -434,29 +468,56 @@ function renderLists() {
     el.innerHTML = '<p class="empty">Nenhuma lista ainda.</p>';
     return;
   }
-  el.innerHTML = "";
+  const monthNames = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
+  const groups = {};
   lists.forEach(l => {
-    const card = document.createElement("div");
-    card.className = "card list-card";
-    card.innerHTML = `
-      <div class="top-row">
-        <div class="content">
-          <div class="date">${formatDate(l.date)}</div>
-          <div class="meta">criada por ${l.createdBy}</div>
+    const [year, month] = l.date.split("-");
+    const key = `${year}-${month}`;
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(l);
+  });
+  const orderedKeys = Object.keys(groups).sort().reverse();
+
+  el.innerHTML = "";
+  orderedKeys.forEach(key => {
+    const [year, month] = key.split("-");
+    const heading = document.createElement("div");
+    heading.className = "month-heading";
+    heading.textContent = `${monthNames[parseInt(month, 10) - 1]} de ${year}`;
+    el.appendChild(heading);
+
+    let monthTotal = 0;
+    groups[key].forEach(l => {
+      monthTotal += (typeof l.totalGasto === "number") ? l.totalGasto : 0;
+      const card = document.createElement("div");
+      card.className = "card list-card";
+      card.innerHTML = `
+        <div class="top-row">
+          <div class="content">
+            <div class="date">${formatDate(l.date)}</div>
+            <div class="meta">criada por ${l.createdBy}${l.totalGasto ? " · " + formatBRL(l.totalGasto) : ""}</div>
+          </div>
+          <span class="badge ${l.finalizada ? 'done' : 'pending'}">${l.finalizada ? 'Finalizada' : 'Em andamento'}</span>
         </div>
-        <span class="badge ${l.finalizada ? 'done' : 'pending'}">${l.finalizada ? 'Finalizada' : 'Em andamento'}</span>
-      </div>
-      <span class="delete-btn">excluir lista</span>
-    `;
-    card.querySelector(".content").addEventListener("click", () => openList(l.id, formatDate(l.date)));
-    card.querySelector(".delete-btn").addEventListener("click", async (e) => {
-      e.stopPropagation();
-      if (!confirm(`Excluir a lista de ${formatDate(l.date)}? Isso apaga todos os itens dela também.`)) return;
-      const itemsSnap = await getDocs(collection(db, "lists", l.id, "items"));
-      await Promise.all(itemsSnap.docs.map(d => deleteDoc(doc(db, "lists", l.id, "items", d.id))));
-      await deleteDoc(doc(db, "lists", l.id));
+        <span class="delete-btn">excluir lista</span>
+      `;
+      card.querySelector(".content").addEventListener("click", () => openList(l.id, formatDate(l.date)));
+      card.querySelector(".delete-btn").addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (!confirm(`Excluir a lista de ${formatDate(l.date)}? Isso apaga todos os itens dela também.`)) return;
+        const itemsSnap = await getDocs(collection(db, "lists", l.id, "items"));
+        await Promise.all(itemsSnap.docs.map(d => deleteDoc(doc(db, "lists", l.id, "items", d.id))));
+        await deleteDoc(doc(db, "lists", l.id));
+      });
+      el.appendChild(card);
     });
-    el.appendChild(card);
+
+    if (monthTotal > 0) {
+      const totalEl = document.createElement("div");
+      totalEl.className = "month-total";
+      totalEl.textContent = `Total do mês: ${formatBRL(monthTotal)}`;
+      el.appendChild(totalEl);
+    }
   });
 }
 
@@ -522,6 +583,20 @@ document.getElementById("deleteListBtn").addEventListener("click", async () => {
 
 function renderDetail() {
   const el = document.getElementById("detailContainer");
+  const totalBannerEl = document.getElementById("totalBanner");
+
+  // total geral da lista (soma de todos os itens com preço)
+  const totalGeral = items.reduce((sum, it) => sum + (typeof it.preco === "number" ? it.preco : 0), 0);
+  if (totalBannerEl) {
+    totalBannerEl.innerHTML = totalGeral > 0
+      ? `<div class="total-banner"><div class="label">Total da compra</div><div class="value">${formatBRL(totalGeral)}</div></div>`
+      : "";
+  }
+  // guarda o total na própria lista, pra usar no agrupamento por mês depois
+  if (currentListId) {
+    updateDoc(doc(db, "lists", currentListId), { totalGasto: totalGeral }).catch(() => {});
+  }
+
   if (items.length === 0) {
     el.innerHTML = '<p class="empty">Nenhum item ainda. Toque em "+ Adicionar item" abaixo.</p>';
     return;
@@ -539,20 +614,24 @@ function renderDetail() {
     const cor = u?.cor || "#777";
     const displayName = u ? (u.apelido || u.name) : "Sem responsável";
     const done = group.filter(i => i.bought).length;
+    const totalPessoa = group.reduce((sum, it) => sum + (typeof it.preco === "number" ? it.preco : 0), 0);
 
     const header = document.createElement("div");
     header.className = "section-header";
     header.style.background = lighten(cor, 0.85);
     header.innerHTML = `
       <span class="title" style="color:${cor}">${displayName}</span>
-      <span class="progress" style="color:${cor}">${done}/${group.length}</span>
+      <span class="progress" style="color:${cor}">${done}/${group.length}${totalPessoa > 0 ? " · " + formatBRL(totalPessoa) : ""}</span>
     `;
     el.appendChild(header);
 
     group.forEach(it => {
       const row = document.createElement("div");
       row.className = "item-row";
-      const qtyLabel = it.quantidade ? `${it.quantidade} ${it.unidade || 'un'}` : "";
+      const qtyLabel = it.quantidade
+        ? `${it.quantidade} ${it.unidade || 'un'}${it.precoUnitario ? ` (${formatBRL(it.precoUnitario)}${(it.unidade === 'kg' || it.unidade === 'g') ? '/kg' : '/un'})` : ""}`
+        : "";
+      const priceLabel = (typeof it.preco === "number") ? `<span class="price-pill">${formatBRL(it.preco)}</span>` : "";
       row.innerHTML = `
         <div class="checkbox ${it.bought ? "checked" : ""}">${it.bought ? "✓" : ""}</div>
         <div class="item-info">
@@ -560,6 +639,7 @@ function renderDetail() {
           ${qtyLabel ? `<div class="item-qty">${qtyLabel}</div>` : ""}
         </div>
         <div class="item-actions">
+          ${priceLabel}
           <span class="icon-btn" title="Reatribuir">🔄</span>
           <span class="icon-btn" title="Remover">🗑️</span>
         </div>
@@ -581,9 +661,33 @@ function renderDetail() {
 }
 
 // ---------- modal: adicionar item ----------
-onSnapshot(query(collection(db, "library"), orderBy("name")), snap => {
-  library = snap.docs.map(d => d.data().name);
+let libraryEntries = [];
+onSnapshot(collection(db, "library"), snap => {
+  libraryEntries = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  library = [...new Set(libraryEntries.map(e => e.name))].sort();
 });
+
+function findLibraryPrice(name, unidade) {
+  const match = libraryEntries.find(
+    e => e.name.toLowerCase() === name.toLowerCase() && e.unidade === unidade
+  );
+  return match ? match.preco : null;
+}
+
+async function saveLibraryPrice(name, unidade, preco) {
+  const existing = libraryEntries.find(
+    e => e.name.toLowerCase() === name.toLowerCase() && e.unidade === unidade
+  );
+  if (existing) {
+    await updateDoc(doc(db, "library", existing.id), { preco });
+  } else {
+    await addDoc(collection(db, "library"), { name, unidade, preco });
+  }
+}
+
+function formatBRL(value) {
+  return "R$ " + Number(value).toFixed(2).replace(".", ",");
+}
 
 function renderAssigneeChips() {
   const el = document.getElementById("assigneeChips");
@@ -606,11 +710,75 @@ document.getElementById("openAddItemBtn").addEventListener("click", () => {
   document.getElementById("itemNameInput").value = "";
   document.getElementById("itemQtyInput").value = "1";
   document.getElementById("itemUnitInput").value = "un";
+  document.getElementById("itemUnitPriceInput").value = "";
+  document.getElementById("itemTotalPriceInput").value = "";
+  lastPriceEdited = null;
+  document.getElementById("itemUnitPriceLabel").textContent = "Valor unitário (R$)";
   document.getElementById("suggestionBox").style.display = "none";
   selectedAssignee = users[0] || null;
   renderAssigneeChips();
   document.getElementById("addItemModal").classList.add("active");
   document.getElementById("itemNameInput").focus();
+});
+
+function isWeightUnit(u) {
+  return u === "kg" || u === "g";
+}
+
+// quantidade "efetiva" para os cálculos: kg convertido quando a unidade é gramas
+function quantidadeEfetiva() {
+  const unidade = document.getElementById("itemUnitInput").value;
+  const quantidade = parseFloat(document.getElementById("itemQtyInput").value) || 0;
+  return unidade === "g" ? quantidade / 1000 : quantidade;
+}
+
+let lastPriceEdited = null; // "unit" ou "total" — qual campo a pessoa editou por último
+
+function updatePriceFieldUI() {
+  const unidade = document.getElementById("itemUnitInput").value;
+  document.getElementById("itemUnitPriceLabel").textContent = isWeightUnit(unidade)
+    ? "Valor do kg (R$/kg)"
+    : "Valor unitário (R$)";
+  recalcFromLastEdited();
+}
+
+function recalcFromLastEdited() {
+  const qtd = quantidadeEfetiva();
+  const unitInput = document.getElementById("itemUnitPriceInput");
+  const totalInput = document.getElementById("itemTotalPriceInput");
+  if (lastPriceEdited === "unit") {
+    const unitVal = parseFloat(unitInput.value);
+    if (!isNaN(unitVal) && qtd > 0) totalInput.value = (unitVal * qtd).toFixed(2);
+  } else if (lastPriceEdited === "total") {
+    const totalVal = parseFloat(totalInput.value);
+    if (!isNaN(totalVal) && qtd > 0) unitInput.value = (totalVal / qtd).toFixed(2);
+  }
+}
+
+function tryPrefillPrice() {
+  const name = document.getElementById("itemNameInput").value.trim();
+  const unidade = document.getElementById("itemUnitInput").value;
+  updatePriceFieldUI();
+  if (!name) return;
+  const lookupUnidade = isWeightUnit(unidade) ? "kg" : unidade;
+  const preco = findLibraryPrice(name, lookupUnidade);
+  if (preco !== null && preco !== undefined) {
+    document.getElementById("itemUnitPriceInput").value = preco;
+    lastPriceEdited = "unit";
+    recalcFromLastEdited();
+  }
+}
+document.getElementById("itemUnitInput").addEventListener("change", () => {
+  updatePriceFieldUI();
+});
+document.getElementById("itemQtyInput").addEventListener("input", recalcFromLastEdited);
+document.getElementById("itemUnitPriceInput").addEventListener("input", () => {
+  lastPriceEdited = "unit";
+  recalcFromLastEdited();
+});
+document.getElementById("itemTotalPriceInput").addEventListener("input", () => {
+  lastPriceEdited = "total";
+  recalcFromLastEdited();
 });
 
 document.getElementById("cancelAddItemBtn").addEventListener("click", () => {
@@ -631,6 +799,7 @@ document.getElementById("itemNameInput").addEventListener("input", (e) => {
     item.addEventListener("click", () => {
       document.getElementById("itemNameInput").value = m;
       box.style.display = "none";
+      tryPrefillPrice();
     });
     box.appendChild(item);
   });
@@ -641,19 +810,32 @@ document.getElementById("confirmAddItemBtn").addEventListener("click", async () 
   const name = document.getElementById("itemNameInput").value.trim();
   const quantidade = parseFloat(document.getElementById("itemQtyInput").value) || 1;
   const unidade = document.getElementById("itemUnitInput").value;
+  const unitRaw = document.getElementById("itemUnitPriceInput").value;
+  const totalRaw = document.getElementById("itemTotalPriceInput").value;
   if (!name || !selectedAssignee) { alert("Escreva o item e escolha quem vai comprar"); return; }
-  await addDoc(collection(db, "lists", currentListId, "items"), {
+
+  const precoUnitario = unitRaw !== "" ? parseFloat(unitRaw) : null;
+  const preco = totalRaw !== "" ? parseFloat(totalRaw) : null;
+
+  const itemData = {
     name,
     quantidade,
     unidade,
+    preco,
     assignedToId: selectedAssignee.id,
     assignedToName: selectedAssignee.name,
     assignedToDisplay: selectedAssignee.apelido || selectedAssignee.name,
     bought: false,
     createdAt: new Date(),
-  });
-  const existing = await getDocs(query(collection(db, "library"), where("name", "==", name)));
-  if (existing.empty) await addDoc(collection(db, "library"), { name });
+  };
+  if (precoUnitario !== null) itemData.precoUnitario = precoUnitario;
+
+  await addDoc(collection(db, "lists", currentListId, "items"), itemData);
+
+  if (precoUnitario !== null) {
+    const lookupUnidade = isWeightUnit(unidade) ? "kg" : unidade;
+    await saveLibraryPrice(name, lookupUnidade, precoUnitario);
+  }
   document.getElementById("addItemModal").classList.remove("active");
 });
 
