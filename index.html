@@ -268,6 +268,7 @@
     <h3 id="itemModalTitle">Adicionar item</h3>
     <input type="text" id="itemNameInput" placeholder="O que precisa comprar?" />
     <div class="suggestion-box" id="suggestionBox" style="display:none"></div>
+    <input type="text" id="itemBrandInput" placeholder="Marca (opcional)" style="margin-top:8px" />
 
     <p class="subtitle" style="margin-top:8px">Quantidade:</p>
     <div class="qty-row">
@@ -309,6 +310,46 @@
     <div class="chip-row" id="reassignChips"></div>
     <div class="modal-actions">
       <button class="secondary" id="cancelReassignBtn" style="flex:1">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: editar item (segurar no item abre isso) -->
+<div class="modal-overlay" id="editItemModal">
+  <div class="modal-card">
+    <h3>Editar item</h3>
+    <p id="editItemName" style="font-weight:600;font-size:16px;margin-bottom:14px;color:#555;"></p>
+
+    <p class="subtitle" style="margin-top:0">Marca (opcional):</p>
+    <input type="text" id="editBrandInput" placeholder="Marca" />
+
+    <p class="subtitle">Quantidade:</p>
+    <div class="qty-row">
+      <input type="number" id="editQtyInput" min="0" step="0.1" />
+      <select id="editUnitInput">
+        <option value="un">un</option>
+        <option value="kg">kg</option>
+        <option value="g">g</option>
+        <option value="pacote">pacote</option>
+        <option value="caixa">caixa</option>
+      </select>
+    </div>
+
+    <p class="subtitle">Preço:</p>
+    <div class="qty-row">
+      <div style="flex:1">
+        <label style="font-size:12px;color:#666;" id="editUnitPriceLabel">Valor unitário (R$)</label>
+        <input type="number" id="editUnitPriceInput" placeholder="0,00" min="0" step="0.01" />
+      </div>
+      <div style="flex:1">
+        <label style="font-size:12px;color:#666;">Valor total (R$)</label>
+        <input type="number" id="editTotalPriceInput" placeholder="0,00" min="0" step="0.01" />
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="secondary" id="cancelEditItemBtn" style="flex:1">Cancelar</button>
+      <button class="green" id="confirmEditItemBtn" style="flex:1">Salvar</button>
     </div>
   </div>
 </div>
@@ -629,8 +670,8 @@ function renderDetail() {
       const row = document.createElement("div");
       row.className = "item-row";
       const qtyLabel = it.quantidade
-        ? `${it.quantidade} ${it.unidade || 'un'}${it.precoUnitario ? ` (${formatBRL(it.precoUnitario)}${(it.unidade === 'kg' || it.unidade === 'g') ? '/kg' : '/un'})` : ""}`
-        : "";
+        ? `${it.marca ? it.marca + " · " : ""}${it.quantidade} ${it.unidade || 'un'}${it.precoUnitario ? ` (${formatBRL(it.precoUnitario)}${(it.unidade === 'kg' || it.unidade === 'g') ? '/kg' : '/un'})` : ""}`
+        : (it.marca || "");
       const priceLabel = (typeof it.preco === "number") ? `<span class="price-pill">${formatBRL(it.preco)}</span>` : "";
       row.innerHTML = `
         <div class="checkbox ${it.bought ? "checked" : ""}">${it.bought ? "✓" : ""}</div>
@@ -647,9 +688,31 @@ function renderDetail() {
       row.querySelector(".checkbox").addEventListener("click", () => {
         updateDoc(doc(db, "lists", currentListId, "items", it.id), { bought: !it.bought });
       });
-      row.querySelector(".item-info").addEventListener("click", () => {
+
+      // clique curto = marcar/desmarcar comprado · segurar = abrir edição (qtd, preço)
+      const infoEl = row.querySelector(".item-info");
+      let pressTimer = null;
+      let longPress = false;
+      const startPress = () => {
+        longPress = false;
+        pressTimer = setTimeout(() => {
+          longPress = true;
+          if (navigator.vibrate) navigator.vibrate(30);
+          openEditItemModal(it);
+        }, 500);
+      };
+      const cancelPress = () => clearTimeout(pressTimer);
+      infoEl.addEventListener("touchstart", startPress, { passive: true });
+      infoEl.addEventListener("touchend", cancelPress);
+      infoEl.addEventListener("touchmove", cancelPress);
+      infoEl.addEventListener("mousedown", startPress);
+      infoEl.addEventListener("mouseup", cancelPress);
+      infoEl.addEventListener("mouseleave", cancelPress);
+      infoEl.addEventListener("click", () => {
+        if (longPress) { longPress = false; return; }
         updateDoc(doc(db, "lists", currentListId, "items", it.id), { bought: !it.bought });
       });
+
       row.querySelectorAll(".icon-btn")[0].addEventListener("click", () => openReassignModal(it.id));
       row.querySelectorAll(".icon-btn")[1].addEventListener("click", async () => {
         if (!confirm(`Remover "${it.name}" da lista?`)) return;
@@ -667,21 +730,28 @@ onSnapshot(collection(db, "library"), snap => {
   library = [...new Set(libraryEntries.map(e => e.name))].sort();
 });
 
-function findLibraryPrice(name, unidade) {
+function findLibraryPrice(name, marca, unidade) {
+  const marcaNorm = (marca || "").trim().toLowerCase();
   const match = libraryEntries.find(
-    e => e.name.toLowerCase() === name.toLowerCase() && e.unidade === unidade
+    e => e.name.toLowerCase() === name.toLowerCase()
+      && ((e.marca || "").trim().toLowerCase()) === marcaNorm
+      && e.unidade === unidade
   );
   return match ? match.preco : null;
 }
 
-async function saveLibraryPrice(name, unidade, preco) {
+async function saveLibraryPrice(name, marca, unidade, preco) {
+  const marcaNorm = (marca || "").trim();
+  const marcaNormLower = marcaNorm.toLowerCase();
   const existing = libraryEntries.find(
-    e => e.name.toLowerCase() === name.toLowerCase() && e.unidade === unidade
+    e => e.name.toLowerCase() === name.toLowerCase()
+      && ((e.marca || "").trim().toLowerCase()) === marcaNormLower
+      && e.unidade === unidade
   );
   if (existing) {
-    await updateDoc(doc(db, "library", existing.id), { preco });
+    await updateDoc(doc(db, "library", existing.id), { preco, marca: marcaNorm });
   } else {
-    await addDoc(collection(db, "library"), { name, unidade, preco });
+    await addDoc(collection(db, "library"), { name, marca: marcaNorm, unidade, preco });
   }
 }
 
@@ -712,6 +782,7 @@ document.getElementById("openAddItemBtn").addEventListener("click", () => {
   document.getElementById("itemUnitInput").value = "un";
   document.getElementById("itemUnitPriceInput").value = "";
   document.getElementById("itemTotalPriceInput").value = "";
+  document.getElementById("itemBrandInput").value = "";
   lastPriceEdited = null;
   document.getElementById("itemUnitPriceLabel").textContent = "Valor unitário (R$)";
   document.getElementById("suggestionBox").style.display = "none";
@@ -757,19 +828,23 @@ function recalcFromLastEdited() {
 
 function tryPrefillPrice() {
   const name = document.getElementById("itemNameInput").value.trim();
+  const marca = document.getElementById("itemBrandInput").value.trim();
   const unidade = document.getElementById("itemUnitInput").value;
   updatePriceFieldUI();
   if (!name) return;
   const lookupUnidade = isWeightUnit(unidade) ? "kg" : unidade;
-  const preco = findLibraryPrice(name, lookupUnidade);
+  const preco = findLibraryPrice(name, marca, lookupUnidade);
   if (preco !== null && preco !== undefined) {
     document.getElementById("itemUnitPriceInput").value = preco;
     lastPriceEdited = "unit";
     recalcFromLastEdited();
   }
+  renderSuggestions();
 }
+document.getElementById("itemBrandInput").addEventListener("input", tryPrefillPrice);
 document.getElementById("itemUnitInput").addEventListener("change", () => {
   updatePriceFieldUI();
+  renderSuggestions();
 });
 document.getElementById("itemQtyInput").addEventListener("input", recalcFromLastEdited);
 document.getElementById("itemUnitPriceInput").addEventListener("input", () => {
@@ -785,17 +860,37 @@ document.getElementById("cancelAddItemBtn").addEventListener("click", () => {
   document.getElementById("addItemModal").classList.remove("active");
 });
 
-document.getElementById("itemNameInput").addEventListener("input", (e) => {
-  const val = e.target.value.trim().toLowerCase();
+function renderSuggestions() {
+  const val = document.getElementById("itemNameInput").value.trim().toLowerCase();
   const box = document.getElementById("suggestionBox");
   if (!val) { box.style.display = "none"; return; }
   const matches = library.filter(n => n.toLowerCase().includes(val) && n.toLowerCase() !== val).slice(0, 5);
   if (matches.length === 0) { box.style.display = "none"; return; }
+
+  const marca = document.getElementById("itemBrandInput").value.trim();
+  const unidade = document.getElementById("itemUnitInput").value;
+  const lookupUnidade = isWeightUnit(unidade) ? "kg" : unidade;
+  const qtd = quantidadeEfetiva();
+
   box.innerHTML = "";
   matches.forEach(m => {
     const item = document.createElement("div");
     item.className = "suggestion-item";
-    item.textContent = m;
+    item.style.display = "flex";
+    item.style.justifyContent = "space-between";
+    item.style.alignItems = "center";
+    item.style.gap = "8px";
+
+    const precoSalvo = findLibraryPrice(m, marca, lookupUnidade);
+    let priceHtml = "";
+    if (precoSalvo !== null && precoSalvo !== undefined) {
+      const unitLabel = isWeightUnit(unidade) ? `${formatBRL(precoSalvo)}/kg` : formatBRL(precoSalvo);
+      let totalLabel = "";
+      if (qtd > 0) totalLabel = ` · total ${formatBRL(precoSalvo * qtd)}`;
+      priceHtml = `<span class="price-pill" style="flex-shrink:0">${unitLabel}${totalLabel}</span>`;
+    }
+
+    item.innerHTML = `<span>${m}</span>${priceHtml}`;
     item.addEventListener("click", () => {
       document.getElementById("itemNameInput").value = m;
       box.style.display = "none";
@@ -804,10 +899,12 @@ document.getElementById("itemNameInput").addEventListener("input", (e) => {
     box.appendChild(item);
   });
   box.style.display = "block";
-});
+}
+document.getElementById("itemNameInput").addEventListener("input", renderSuggestions);
 
 document.getElementById("confirmAddItemBtn").addEventListener("click", async () => {
   const name = document.getElementById("itemNameInput").value.trim();
+  const marca = document.getElementById("itemBrandInput").value.trim();
   const quantidade = parseFloat(document.getElementById("itemQtyInput").value) || 1;
   const unidade = document.getElementById("itemUnitInput").value;
   const unitRaw = document.getElementById("itemUnitPriceInput").value;
@@ -819,6 +916,7 @@ document.getElementById("confirmAddItemBtn").addEventListener("click", async () 
 
   const itemData = {
     name,
+    marca,
     quantidade,
     unidade,
     preco,
@@ -834,7 +932,7 @@ document.getElementById("confirmAddItemBtn").addEventListener("click", async () 
 
   if (precoUnitario !== null) {
     const lookupUnidade = isWeightUnit(unidade) ? "kg" : unidade;
-    await saveLibraryPrice(name, lookupUnidade, precoUnitario);
+    await saveLibraryPrice(name, marca, lookupUnidade, precoUnitario);
   }
   document.getElementById("addItemModal").classList.remove("active");
 });
@@ -865,6 +963,92 @@ function openReassignModal(itemId) {
 
 document.getElementById("cancelReassignBtn").addEventListener("click", () => {
   document.getElementById("reassignModal").classList.remove("active");
+});
+
+// ---------- modal: editar item (quantidade / preço, produto fica travado) ----------
+let editingItem = null;
+let editLastPriceEdited = null;
+
+function editQuantidadeEfetiva() {
+  const unidade = document.getElementById("editUnitInput").value;
+  const quantidade = parseFloat(document.getElementById("editQtyInput").value) || 0;
+  return unidade === "g" ? quantidade / 1000 : quantidade;
+}
+
+function editRecalcFromLastEdited() {
+  const qtd = editQuantidadeEfetiva();
+  const unitInput = document.getElementById("editUnitPriceInput");
+  const totalInput = document.getElementById("editTotalPriceInput");
+  if (editLastPriceEdited === "unit") {
+    const unitVal = parseFloat(unitInput.value);
+    if (!isNaN(unitVal) && qtd > 0) totalInput.value = (unitVal * qtd).toFixed(2);
+  } else if (editLastPriceEdited === "total") {
+    const totalVal = parseFloat(totalInput.value);
+    if (!isNaN(totalVal) && qtd > 0) unitInput.value = (totalVal / qtd).toFixed(2);
+  }
+}
+
+function editUpdatePriceLabel() {
+  const unidade = document.getElementById("editUnitInput").value;
+  document.getElementById("editUnitPriceLabel").textContent = isWeightUnit(unidade)
+    ? "Valor do kg (R$/kg)"
+    : "Valor unitário (R$)";
+}
+
+function openEditItemModal(it) {
+  editingItem = it;
+  editLastPriceEdited = null;
+  document.getElementById("editItemName").textContent = it.name;
+  document.getElementById("editBrandInput").value = it.marca || "";
+  document.getElementById("editQtyInput").value = it.quantidade || 1;
+  document.getElementById("editUnitInput").value = it.unidade || "un";
+  document.getElementById("editUnitPriceInput").value = (it.precoUnitario !== undefined && it.precoUnitario !== null) ? it.precoUnitario : "";
+  document.getElementById("editTotalPriceInput").value = (it.preco !== undefined && it.preco !== null) ? it.preco : "";
+  editUpdatePriceLabel();
+  document.getElementById("editItemModal").classList.add("active");
+}
+
+document.getElementById("editUnitInput").addEventListener("change", () => {
+  editUpdatePriceLabel();
+  editRecalcFromLastEdited();
+});
+document.getElementById("editQtyInput").addEventListener("input", editRecalcFromLastEdited);
+document.getElementById("editUnitPriceInput").addEventListener("input", () => {
+  editLastPriceEdited = "unit";
+  editRecalcFromLastEdited();
+});
+document.getElementById("editTotalPriceInput").addEventListener("input", () => {
+  editLastPriceEdited = "total";
+  editRecalcFromLastEdited();
+});
+
+document.getElementById("cancelEditItemBtn").addEventListener("click", () => {
+  document.getElementById("editItemModal").classList.remove("active");
+});
+
+document.getElementById("confirmEditItemBtn").addEventListener("click", async () => {
+  if (!editingItem) return;
+  const marca = document.getElementById("editBrandInput").value.trim();
+  const quantidade = parseFloat(document.getElementById("editQtyInput").value) || 1;
+  const unidade = document.getElementById("editUnitInput").value;
+  const unitRaw = document.getElementById("editUnitPriceInput").value;
+  const totalRaw = document.getElementById("editTotalPriceInput").value;
+  const precoUnitario = unitRaw !== "" ? parseFloat(unitRaw) : null;
+  const preco = totalRaw !== "" ? parseFloat(totalRaw) : null;
+
+  const updates = { quantidade, unidade, preco, marca };
+  if (precoUnitario !== null) {
+    updates.precoUnitario = precoUnitario;
+  }
+  await updateDoc(doc(db, "lists", currentListId, "items", editingItem.id), updates);
+
+  if (precoUnitario !== null) {
+    const lookupUnidade = isWeightUnit(unidade) ? "kg" : unidade;
+    await saveLibraryPrice(editingItem.name, marca, lookupUnidade, precoUnitario);
+  }
+
+  document.getElementById("editItemModal").classList.remove("active");
+  editingItem = null;
 });
 
 // ---------- inicialização ----------
